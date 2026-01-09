@@ -1,12 +1,12 @@
 import json
-import google.generativeai as genai
+import re
 from bdh_core import BDHState
 
 
 def analyze_chunk(model, narrative_chunk: str, backstory: str):
     """
-    Analyze a single narrative chunk and return (claim, signal).
-    This function is HARDENED against Gemini format drift.
+    Analyze a narrative chunk and return (claim, signal).
+    Robust against Gemini format drift.
     """
 
     prompt = f"""
@@ -18,7 +18,7 @@ Backstory:
 Narrative evidence:
 {narrative_chunk}
 
-Respond in JSON ONLY using this exact schema:
+Respond ONLY with valid JSON in this exact format:
 {{
   "score": 1 | 0.5 | -0.5 | -1,
   "claim": "short causal claim"
@@ -28,45 +28,48 @@ Respond in JSON ONLY using this exact schema:
     try:
         response = model.generate_content(prompt)
 
-        # ---- SAFE TEXT EXTRACTION ----
-        text = None
+        # ---- SAFE RAW TEXT EXTRACTION ----
         if hasattr(response, "text") and response.text:
-            text = response.text
+            raw = response.text
         elif hasattr(response, "candidates") and response.candidates:
-            text = response.candidates[0].content.parts[0].text
+            raw = response.candidates[0].content.parts[0].text
+        else:
+            raise ValueError("Empty Gemini response")
 
-        if not text:
-            raise ValueError("Empty response from Gemini")
+        # ---- EXTRACT JSON BLOCK EVEN WITH EXTRA TEXT ----
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if not match:
+            raise ValueError("No JSON found in response")
 
-        # ---- JSON PARSING ----
-        data = json.loads(text)
+        json_text = match.group(0)
+        data = json.loads(json_text)
 
-        score = float(data.get("score", 0.0))
-        claim = str(data.get("claim", "unknown_claim"))
+        score = float(data["score"])
+        claim = str(data["claim"])
 
         return claim, score
 
     except Exception:
-        # NEVER crash Track B pipeline
+        # HARD FAIL-SAFE: no crash, no hallucinated update
         return "unparseable_response", 0.0
 
 
 def run_bdh_pipeline(model, narrative: str, backstory: str):
     """
-    Full BDH-inspired continuous reasoning pipeline.
+    Full BDH-style continuous reasoning pipeline.
     """
 
     state = BDHState()
 
-    # Simulate long-context reasoning
+    # Chunk narrative (simulate long-context reasoning)
     chunks = [c.strip() for c in narrative.split("\n\n") if c.strip()]
-    chunks = chunks[:8]  # cap for stability
+    chunks = chunks[:8]  # safety cap
 
     for chunk in chunks:
         claim, signal = analyze_chunk(model, chunk, backstory)
 
-        # Sparse update (BDH-inspired)
-        if abs(signal) >= 0.5:
+        # 🔑 SPARSE UPDATE (LOWERED FOR VISIBILITY)
+        if abs(signal) >= 0.3:
             state.sparse_update(claim, signal)
 
     final_score = state.global_score()
