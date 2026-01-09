@@ -6,8 +6,7 @@ from reasoner import run_bdh_pipeline
 # ---------------- PAGE CONFIG ----------------
 st.set_page_config(
     page_title="Track B – BDH Continuous Reasoner",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
 # ---------------- SAFETY CHECK ----------------
@@ -31,23 +30,21 @@ st.markdown(
 
 st.divider()
 
-# ---------------- INPUT SECTION ----------------
-st.subheader("🧾 Input Specification")
-
+# ---------------- INPUT ----------------
 col1, col2 = st.columns(2)
 
 with col1:
     narrative = st.text_area(
         "Narrative Evidence",
         height=260,
-        placeholder="Paste narrative text (long context supported)…"
+        placeholder="Paste narrative text (events, actions, decisions)…"
     )
 
 with col2:
     backstory = st.text_area(
         "Hypothetical Backstory",
         height=260,
-        placeholder="Describe background assumptions / character traits…"
+        placeholder="Describe character beliefs, motivations, commitments…"
     )
 
 run = st.button("🚀 Execute BDH Continuous Reasoning", use_container_width=True)
@@ -55,38 +52,31 @@ run = st.button("🚀 Execute BDH Continuous Reasoning", use_container_width=Tru
 # ---------------- EXECUTION ----------------
 if run:
     if not narrative or not backstory:
-        st.warning("⚠️ Both narrative and backstory are required.")
+        st.warning("⚠️ Both inputs are required.")
     else:
         with st.spinner("Running BDH belief-state updates…"):
             prediction, state = run_bdh_pipeline(model, narrative, backstory)
 
         st.divider()
 
-        # ---------------- FINAL VERDICT ----------------
+        # ---- FINAL VERDICT ----
         st.subheader("✅ Final Consistency Judgment")
-
         if prediction == 1:
             st.success("CONSISTENT (1)")
         else:
             st.error("CONTRADICT (0)")
 
-        # ---------------- CONFIDENCE TRAJECTORY ----------------
+        # ---- TRAJECTORY ----
         st.subheader("📈 Belief-State Confidence Trajectory")
-
         if state.trajectory:
-            traj_df = pd.DataFrame(state.trajectory)
-            traj_df["step"] = range(1, len(traj_df) + 1)
-
-            st.line_chart(
-                traj_df.set_index("step")["current_score"],
-                height=250
-            )
+            df = pd.DataFrame(state.trajectory)
+            df["step"] = range(1, len(df) + 1)
+            st.line_chart(df.set_index("step")["current_score"])
         else:
             st.info("No significant belief updates recorded.")
 
-        # ---------------- STATE TRAJECTORY LOG ----------------
+        # ---- STATE UPDATES ----
         st.subheader("🧠 Incremental State Updates (BDH-style)")
-
         for i, t in enumerate(state.trajectory, start=1):
             with st.expander(f"Chunk {i}: {t['claim']}"):
                 st.markdown(f"""
@@ -94,28 +84,21 @@ if run:
                 **Updated Score:** `{t['current_score']}`
                 """)
 
-        # ---------------- BELIEF NODES ----------------
+        # ---- BELIEF NODES ----
         st.subheader("🧩 Final Belief Nodes")
-
-        belief_rows = []
-        for claim, node in state.nodes.items():
-            belief_rows.append({
-                "Claim": claim,
-                "Support": node.support,
-                "Conflict": node.conflict,
-                "Final Score": node.score
-            })
-
-        if belief_rows:
-            belief_df = pd.DataFrame(belief_rows)
-            st.dataframe(
-                belief_df,
-                use_container_width=True
-            )
+        if state.nodes:
+            rows = []
+            for claim, node in state.nodes.items():
+                rows.append({
+                    "Claim": claim,
+                    "Support": node.support,
+                    "Conflict": node.conflict,
+                    "Final Score": node.score
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True)
         else:
             st.info("No belief nodes formed.")
 
-# ---------------- FOOTER ----------------
 st.divider()
 st.caption(
     "Track B Submission • BDH-Inspired Continuous Reasoning • "
