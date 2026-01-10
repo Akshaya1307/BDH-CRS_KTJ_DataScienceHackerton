@@ -2,7 +2,6 @@ import json
 import re
 from bdh_core import BDHState
 
-
 def analyze_chunk(model, narrative_chunk: str, backstory: str):
     """
     Analyze a narrative chunk and return (claim, signal).
@@ -33,29 +32,37 @@ Respond ONLY with valid JSON in this exact format:
         elif hasattr(response, "candidates") and response.candidates:
             raw = response.candidates[0].content.parts[0].text
         else:
-            raise ValueError("Empty model response")
+            raise ValueError("Empty Gemini response")
+
+        # ---- DEBUG LOGGING ----
+        # Print raw response for debugging (can be logged to a file if needed)
+        print(f"Raw LLM response:\n{raw}")
 
         # ---- EXTRACT JSON BLOCK EVEN WITH EXTRA TEXT ----
         match = re.search(r"\{.*\}", raw, re.DOTALL)
         if not match:
-            raise ValueError("No JSON found")
+            raise ValueError("No JSON found in response")
 
-        data = json.loads(match.group(0))
+        json_text = match.group(0)
+        data = json.loads(json_text)
 
         score = float(data["score"])
-        claim = str(data["claim"]).strip()
+        claim = str(data["claim"])
 
         return claim, score
 
-    except Exception:
-        # IMPORTANT: parse failure is informative, not neutral
-        return "model_output_parse_failure", -0.5
+    except Exception as e:
+        # Log exception details for debugging
+        print(f"Error parsing LLM response: {e}")
+        print(f"Raw response was: {raw if 'raw' in locals() else 'N/A'}")
+
+        # Use a neutral fallback claim and zero signal to avoid polluting belief nodes negatively
+        return "unparseable_response", 0.0
 
 
 def run_bdh_pipeline(model, narrative: str, backstory: str):
     """
     Full BDH-style continuous reasoning pipeline.
-    Guarantees belief evolution visibility.
     """
 
     state = BDHState()
@@ -67,13 +74,9 @@ def run_bdh_pipeline(model, narrative: str, backstory: str):
     for chunk in chunks:
         claim, signal = analyze_chunk(model, chunk, backstory)
 
-        # 🔑 ALWAYS update if claim exists
-        if claim:
+        # 🔑 SPARSE UPDATE (LOWERED FOR VISIBILITY)
+        if abs(signal) >= 0.3:
             state.sparse_update(claim, signal)
-
-    # 🔒 Ensure at least one belief node exists
-    if not getattr(state, "beliefs", None):
-        state.sparse_update("default_consistency_assumption", 0.1)
 
     final_score = state.global_score()
     prediction = 1 if final_score >= 0 else 0
