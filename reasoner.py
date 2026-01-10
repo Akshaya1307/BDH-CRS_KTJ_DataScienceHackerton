@@ -6,7 +6,6 @@ from bdh_core import BDHState
 def analyze_chunk(model, narrative_chunk: str, backstory: str):
     """
     Analyze a narrative chunk and return (claim, signal).
-    Robust against Gemini format drift.
     """
 
     prompt = f"""
