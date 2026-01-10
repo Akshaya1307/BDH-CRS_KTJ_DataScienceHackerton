@@ -26,7 +26,7 @@ class BDHState:
 
     @property
     def beliefs(self):
-        # Alias to support external code expecting `beliefs`
+        # Alias for compatibility with UI / reasoner
         return self.nodes
 
     def sparse_update(self, claim: str, signal: float):
@@ -35,10 +35,12 @@ class BDHState:
 
         self.nodes[claim].update(signal)
 
+        # Track updates for plotting in Streamlit
         self.trajectory.append({
+            "step": len(self.trajectory) + 1,
             "claim": claim,
             "signal": signal,
-            "claim_score": self.nodes[claim].score,
+            "current_score": self.nodes[claim].score,  # Match Streamlit app key
             "global_score": self.global_score()
         })
 
