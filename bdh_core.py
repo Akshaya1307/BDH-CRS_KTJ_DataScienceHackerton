@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Dict, List
 
-
 @dataclass
 class BeliefNode:
     claim: str
@@ -17,7 +16,6 @@ class BeliefNode:
     @property
     def score(self) -> float:
         return self.support - self.conflict
-
 
 @dataclass
 class BDHState:
