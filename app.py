@@ -51,11 +51,16 @@ run = st.button("🚀 Execute BDH Continuous Reasoning", use_container_width=Tru
 
 # ---------------- EXECUTION ----------------
 if run:
-    if not narrative or not backstory:
+    if not narrative.strip() or not backstory.strip():
         st.warning("⚠️ Both inputs are required.")
     else:
         with st.spinner("Running BDH belief-state updates…"):
-            prediction, state = run_bdh_pipeline(model, narrative, backstory)
+            try:
+                prediction, state = run_bdh_pipeline(model, narrative, backstory)
+            except Exception as e:
+                st.error("❌ An error occurred during reasoning.")
+                st.exception(e)
+                st.stop()
 
         st.divider()
 
@@ -70,23 +75,34 @@ if run:
         st.subheader("📈 Belief-State Confidence Trajectory")
         if state.trajectory:
             df = pd.DataFrame(state.trajectory)
-            df["step"] = range(1, len(df) + 1)
+            # Ensure step exists for plotting
+            if "step" not in df.columns:
+                df["step"] = range(1, len(df) + 1)
+            # Safe fallback if current_score missing
+            if "current_score" not in df.columns:
+                df["current_score"] = df.get("claim_score", 0.0)
             st.line_chart(df.set_index("step")["current_score"])
         else:
             st.info("No significant belief updates recorded.")
 
         # ---- STATE UPDATES ----
         st.subheader("🧠 Incremental State Updates (BDH-style)")
-        for i, t in enumerate(state.trajectory, start=1):
-            with st.expander(f"Chunk {i}: {t['claim']}"):
-                st.markdown(f"""
-                **Signal:** `{t['signal']}`  
-                **Updated Score:** `{t['current_score']}`
-                """)
+        if state.trajectory:
+            for i, t in enumerate(state.trajectory, start=1):
+                claim_text = t.get("claim", "Unknown Claim")
+                signal = t.get("signal", 0.0)
+                score = t.get("current_score", 0.0)
+                with st.expander(f"Chunk {i}: {claim_text}"):
+                    st.markdown(f"""
+                    **Signal:** `{signal}`  
+                    **Updated Score:** `{score}`
+                    """)
+        else:
+            st.info("No incremental updates recorded.")
 
         # ---- BELIEF NODES ----
         st.subheader("🧩 Final Belief Nodes")
-        if state.nodes:
+        if getattr(state, "nodes", None) and state.nodes:
             rows = []
             for claim, node in state.nodes.items():
                 rows.append({
