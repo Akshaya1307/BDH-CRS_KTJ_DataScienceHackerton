@@ -34,29 +34,29 @@ Respond ONLY with valid JSON in this exact format:
         elif hasattr(response, "candidates") and response.candidates:
             raw = response.candidates[0].content.parts[0].text
         else:
-            raise ValueError("Empty Gemini response")
+            raise ValueError("Empty model response")
 
         # ---- EXTRACT JSON BLOCK EVEN WITH EXTRA TEXT ----
         match = re.search(r"\{.*\}", raw, re.DOTALL)
         if not match:
-            raise ValueError("No JSON found in response")
+            raise ValueError("No JSON found")
 
-        json_text = match.group(0)
-        data = json.loads(json_text)
+        data = json.loads(match.group(0))
 
         score = float(data["score"])
-        claim = str(data["claim"])
+        claim = str(data["claim"]).strip()
 
         return claim, score
 
     except Exception:
-        # HARD FAIL-SAFE: no crash, no hallucinated update
-        return "unparseable_response", 0.0
+        # IMPORTANT: parse failure is informative, not neutral
+        return "model_output_parse_failure", -0.5
 
 
 def run_bdh_pipeline(model, narrative: str, backstory: str):
     """
     Full BDH-style continuous reasoning pipeline.
+    Guarantees belief evolution visibility.
     """
 
     state = BDHState()
@@ -68,9 +68,13 @@ def run_bdh_pipeline(model, narrative: str, backstory: str):
     for chunk in chunks:
         claim, signal = analyze_chunk(model, chunk, backstory)
 
-        # 🔑 SPARSE UPDATE (LOWERED FOR VISIBILITY)
-        if abs(signal) >= 0.3:
+        # 🔑 ALWAYS update if claim exists
+        if claim:
             state.sparse_update(claim, signal)
+
+    # 🔒 Ensure at least one belief node exists
+    if not getattr(state, "beliefs", None):
+        state.sparse_update("default_consistency_assumption", 0.1)
 
     final_score = state.global_score()
     prediction = 1 if final_score >= 0 else 0
