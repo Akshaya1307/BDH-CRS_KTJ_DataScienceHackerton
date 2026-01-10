@@ -24,6 +24,11 @@ class BDHState:
     nodes: Dict[str, BeliefNode] = field(default_factory=dict)
     trajectory: List[dict] = field(default_factory=list)
 
+    @property
+    def beliefs(self):
+        # Alias to support external code expecting `beliefs`
+        return self.nodes
+
     def sparse_update(self, claim: str, signal: float):
         if claim not in self.nodes:
             self.nodes[claim] = BeliefNode(claim=claim)
@@ -33,7 +38,8 @@ class BDHState:
         self.trajectory.append({
             "claim": claim,
             "signal": signal,
-            "current_score": self.nodes[claim].score
+            "claim_score": self.nodes[claim].score,
+            "global_score": self.global_score()
         })
 
     def global_score(self) -> float:
