@@ -1,5 +1,4 @@
 import streamlit as st
-import google.generativeai as genai
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
@@ -62,24 +61,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --------------------- SAFETY CHECK ---------------------
-if "GEMINI_API_KEY" not in st.secrets:
-    st.error("❌ GEMINI_API_KEY not configured in Streamlit Secrets.")
-    st.stop()
-
-# --------------------- INITIALIZE MODEL ---------------------
-@st.cache_resource
-def load_model():
-    """Load and cache the Gemini model."""
-    try:
-        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        return genai.GenerativeModel("gemini-1.5-flash")
-    except Exception as e:
-        st.error(f"❌ Failed to load model: {e}")
-        st.stop()
-
-model = load_model()
-
 # --------------------- SIDEBAR ---------------------
 with st.sidebar:
     st.markdown("## ⚙️ Configuration")
@@ -90,7 +71,7 @@ with st.sidebar:
         "Minimum chunk length (words)",
         min_value=1,
         max_value=10,
-        value=1,  # Changed from 3 to 1
+        value=2,
         help="Minimum number of words per chunk to process"
     )
     
@@ -98,9 +79,9 @@ with st.sidebar:
         "Signal threshold",
         min_value=0.0,
         max_value=1.0,
-        value=0.01,  # Changed from 0.1 to 0.01
+        value=0.01,
         step=0.01,
-        help="Minimum absolute signal value to update beliefs (recommended: 0.01)"
+        help="Minimum absolute signal value to update beliefs"
     )
     
     decision_threshold = st.slider(
@@ -112,42 +93,41 @@ with st.sidebar:
         help="Threshold for final decision (higher = more conservative)"
     )
     
-    use_caching = st.checkbox(
-        "Use caching",
-        value=True,
-        help="Cache analyses for faster repeated runs"
-    )
-    
     # Example selector
     st.markdown("### Examples")
     example_choice = st.selectbox(
         "Load example",
-        ["None", "Loyal Friend", "Suspicious Behavior", "Career Change", "Simple Test"],
-        index=4  # Default to Simple Test
+        ["None", "Loyal Friend", "Contradictory Friend", "Suspicious Behavior", 
+         "Career Change", "Simple Test", "Mixed Evidence"],
+        index=5  # Default to Simple Test
     )
     
     # Info section
-    with st.expander("ℹ️ About BDH"):
+    with st.expander("ℹ️ About BDH Reasoner"):
         st.markdown("""
         **BDH (Belief-Dynamics Hybrid) Reasoning**:
         
-        - **Continuous**: Updates beliefs incrementally as evidence arrives
-        - **Sparse**: Only significant evidence updates belief nodes
-        - **Persistent**: Maintains internal state across narrative
-        - **Explainable**: Tracks reasoning trajectory
+        - **Rule-based semantic analysis**: Uses keyword matching and contradiction detection
+        - **Continuous reasoning**: Updates beliefs incrementally as evidence arrives
+        - **Persistent state**: Maintains internal belief state across narrative
+        - **Explainable**: Tracks reasoning trajectory with full transparency
         
-        Each narrative chunk is evaluated for consistency with the backstory,
-        with scores from -1 (contradiction) to +1 (alignment).
+        **Scoring System**:
+        - **1.0**: Strong alignment (70%+ keyword match)
+        - **0.5**: Moderate alignment (30-70% keyword match)  
+        - **0.0**: Neutral/ambiguous (<30% match)
+        - **-0.5**: Moderate contradiction
+        - **-1.0**: Strong contradiction (opposite keywords)
         """)
     
     st.divider()
-    st.caption(f"BDH Reasoner v1.3 • {datetime.now().strftime('%Y-%m-%d')}")
+    st.caption(f"BDH Rule-Based Reasoner v2.0 • {datetime.now().strftime('%Y-%m-%d')}")
 
 # --------------------- HEADER ---------------------
 st.markdown('<h1 class="main-header">🧠 BDH Continuous Reasoner</h1>', unsafe_allow_html=True)
 st.markdown("""
 <p style='text-align:center; color: #6b7280; font-size: 1.1rem;'>
-Track B: Belief-Dynamics Hybrid reasoning with persistent internal state
+Track B: Rule-based BDH reasoning with persistent internal state • No external AI dependencies
 </p>
 """, unsafe_allow_html=True)
 
@@ -162,6 +142,12 @@ examples = {
         drove 20 miles through heavy rain, and helped Mike change the tire. 
         He then drove Mike home safely, even though it made him miss an important work deadline.""",
         "backstory": "John is a loyal friend who always prioritizes friendships over personal convenience."
+    },
+    "Contradictory Friend": {
+        "narrative": """John promised to help his friend move. On moving day, 
+        John went to a baseball game instead. He ignored his friend's calls. 
+        Later, he lied about being sick.""",
+        "backstory": "John is a loyal friend who always keeps his promises."
     },
     "Suspicious Behavior": {
         "narrative": """Sarah noticed her colleague Tom frequently staying late at the office. 
@@ -178,8 +164,12 @@ examples = {
         "backstory": "Maria is preparing to leave her legal career to become a full-time artist."
     },
     "Simple Test": {
-        "narrative": "John helped his friend. This shows loyalty. He prioritized friendship.",
-        "backstory": "John is a loyal friend."
+        "narrative": "John helped his friend. This shows loyalty. He prioritized friendship over work.",
+        "backstory": "John is a loyal friend who values relationships."
+    },
+    "Mixed Evidence": {
+        "narrative": "The company reported record profits. However, employee morale is low. Stock prices fell despite good earnings.",
+        "backstory": "The company is performing extremely well in all aspects."
     }
 }
 
@@ -191,7 +181,7 @@ with col1:
     narrative = st.text_area(
         "Enter narrative text (events, actions, decisions):",
         height=280,
-        placeholder="""Example: John helped his friend. This shows loyalty. He prioritized friendship.""",
+        placeholder="""Example: John helped his friend. This shows loyalty. He prioritized friendship over work.""",
         value=examples[example_choice]["narrative"],
         help="Enter the sequence of events or facts to analyze"
     )
@@ -207,7 +197,7 @@ with col2:
     backstory = st.text_area(
         "Describe character beliefs, motivations, or context:",
         height=280,
-        placeholder="""Example: John is a loyal friend.""",
+        placeholder="""Example: John is a loyal friend who values relationships.""",
         value=examples[example_choice]["backstory"],
         help="Enter the hypothetical context to evaluate the narrative against"
     )
@@ -262,20 +252,18 @@ if run_button and narrative.strip() and backstory.strip():
         try:
             # Update status
             status_text.info("📝 Splitting narrative into chunks...")
-            main_progress.progress(10, text="Preprocessing narrative...")
+            main_progress.progress(20, text="Preprocessing narrative...")
             
             # Run the pipeline
-            status_text.info("🧠 Analyzing chunks with BDH reasoning...")
-            main_progress.progress(30, text="Analyzing evidence chunks...")
+            status_text.info("🧠 Analyzing chunks with rule-based reasoning...")
+            main_progress.progress(60, text="Analyzing evidence chunks...")
             
             prediction, state, metadata = run_bdh_pipeline(
-                model=model,
                 narrative=narrative,
                 backstory=backstory,
                 min_chunk_length=min_chunk_length,
                 signal_threshold=signal_threshold,
-                decision_threshold=decision_threshold,
-                use_caching=use_caching
+                decision_threshold=decision_threshold
             )
             
             # Complete progress
@@ -285,6 +273,7 @@ if run_button and narrative.strip() and backstory.strip():
             # Update metadata
             metadata["processing_time"] = processing_time
             metadata["timestamp"] = datetime.now().isoformat()
+            metadata["method"] = "rule-based semantic analysis"
             
             # Store results
             st.session_state.results = {
@@ -335,11 +324,15 @@ if run_button and narrative.strip() and backstory.strip():
                 st.markdown('</div>', unsafe_allow_html=True)
         
         with col_score:
+            score_value = metadata['normalized_score']
+            score_display = f"{score_value:+.3f}"
+            delta_color = "normal" if score_value >= 0 else "inverse"
+            
             st.metric(
                 "Normalized Score",
-                f"{metadata['normalized_score']:.3f}",
+                score_display,
                 delta=f"Threshold: {decision_threshold}",
-                delta_color="off"
+                delta_color=delta_color
             )
         
         with col_confidence:
@@ -358,7 +351,10 @@ if run_button and narrative.strip() and backstory.strip():
             st.metric("Processing Time", f"{metadata['processing_time']:.2f}s")
         
         with col2:
-            st.metric("Chunks Processed", f"{metadata['processed_chunks']}/{metadata['total_chunks']}")
+            processed = metadata['processed_chunks']
+            total = metadata['total_chunks']
+            percentage = (processed / total * 100) if total > 0 else 0
+            st.metric("Chunks Processed", f"{processed}/{total} ({percentage:.0f}%)")
         
         with col3:
             density = metadata.get('belief_density', 0)
@@ -438,19 +434,18 @@ if run_button and narrative.strip() and backstory.strip():
             for claim, node in state.nodes.items():
                 nodes_data.append({
                     "Claim": claim[:100] + "..." if len(claim) > 100 else claim,
-                    "Full Claim": claim,
                     "Support": node.support,
                     "Conflict": node.conflict,
-                    "Score": node.score,
+                    "Score": f"{node.score:+.2f}",
                     "Evidence Count": node.evidence_count,
-                    "Confidence": f"{node.confidence:.2%}"
+                    "Confidence": f"{node.confidence:.1%}"
                 })
             
             df_nodes = pd.DataFrame(nodes_data)
             
             # Display interactive table
             st.dataframe(
-                df_nodes[["Claim", "Support", "Conflict", "Score", "Evidence Count", "Confidence"]],
+                df_nodes,
                 use_container_width=True,
                 hide_index=True
             )
@@ -458,36 +453,75 @@ if run_button and narrative.strip() and backstory.strip():
             # Node visualization
             with st.expander("📊 Visualize Belief Network"):
                 if len(df_nodes) > 0:
+                    # Convert score back to float for plotting
+                    df_plot = df_nodes.copy()
+                    df_plot['Score_Num'] = df_plot['Score'].str.replace('+', '').astype(float)
+                    
                     # Create bar chart of node scores
                     fig_nodes = px.bar(
-                        df_nodes.nlargest(10, 'Score'),
+                        df_plot.nlargest(10, 'Score_Num'),
                         x='Claim',
-                        y='Score',
-                        color='Score',
+                        y='Score_Num',
+                        color='Score_Num',
                         color_continuous_scale='RdYlGn',
-                        title='Top 10 Belief Nodes by Score'
+                        title='Top 10 Belief Nodes by Score',
+                        labels={'Score_Num': 'Score'}
                     )
                     fig_nodes.update_layout(height=400)
                     st.plotly_chart(fig_nodes, use_container_width=True)
         else:
             st.info("No belief nodes formed.")
         
+        # ---- SEMANTIC ANALYSIS DETAILS ----
+        with st.expander("🔍 Semantic Analysis Details"):
+            st.markdown("### Keyword Analysis")
+            
+            # Extract and display keywords
+            from reasoner import extract_keywords
+            
+            backstory_keywords = extract_keywords(backstory)
+            narrative_keywords = extract_keywords(narrative)
+            
+            col_kw1, col_kw2 = st.columns(2)
+            
+            with col_kw1:
+                st.markdown("**Backstory Keywords:**")
+                if backstory_keywords:
+                    st.write(", ".join(sorted(backstory_keywords)))
+                else:
+                    st.write("No significant keywords found")
+            
+            with col_kw2:
+                st.markdown("**Narrative Keywords:**")
+                if narrative_keywords:
+                    st.write(", ".join(sorted(narrative_keywords)))
+                else:
+                    st.write("No significant keywords found")
+            
+            # Show matching keywords
+            if backstory_keywords and narrative_keywords:
+                matches = set(backstory_keywords).intersection(set(narrative_keywords))
+                if matches:
+                    st.markdown(f"**Matching Keywords ({len(matches)}):**")
+                    st.write(", ".join(sorted(matches)))
+        
         # ---- RAW DATA EXPORT ----
         st.subheader("💾 Export Results")
         
-        col_export1, col_export2, col_export3 = st.columns(3)
+        col_export1, col_export2 = st.columns(2)
         
         with col_export1:
             if st.button("📥 Download JSON", use_container_width=True):
-                # Clean metadata for export
-                clean_metadata = {k: v for k, v in metadata.items() 
-                                if k not in ['timestamp']}
-                
+                # Prepare download data
                 download_data = {
-                    "metadata": clean_metadata,
+                    "metadata": metadata,
                     "prediction": prediction,
                     "trajectory": state.trajectory,
-                    "nodes": {k: v.__dict__ for k, v in state.nodes.items()}
+                    "nodes": {k: v.__dict__ for k, v in state.nodes.items()},
+                    "inputs": {
+                        "narrative": narrative,
+                        "backstory": backstory
+                    }
                 }
                 
                 # Convert to JSON
@@ -503,44 +537,19 @@ if run_button and narrative.strip() and backstory.strip():
                 )
         
         with col_export2:
-            if st.button("📊 Export to CSV", use_container_width=True):
-                if state.trajectory:
-                    df_export = pd.DataFrame(state.trajectory)
-                    csv = df_export.to_csv(index=False)
-                    st.download_button(
-                        label="Click to download",
-                        data=csv,
-                        file_name=f"bdh_trajectory_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv",
-                        use_container_width=True
-                    )
-        
-        with col_export3:
             if st.button("📋 Copy Summary", use_container_width=True):
                 summary = f"""
 BDH Analysis Summary:
 - Final Judgment: {'CONSISTENT' if prediction == 1 else 'CONTRADICT' if prediction == 0 else 'UNCERTAIN'}
-- Normalized Score: {metadata['normalized_score']:.3f}
+- Normalized Score: {metadata['normalized_score']:+.3f}
 - Confidence: {metadata['confidence_score']:.3f}
 - Processing Time: {metadata['processing_time']:.2f}s
 - Chunks Analyzed: {metadata['total_chunks']} (processed: {metadata['processed_chunks']})
 - Belief Nodes: {metadata['belief_nodes']}
 - Belief Density: {metadata.get('belief_density', 0):.1%}
+- Method: Rule-based semantic analysis
                 """
                 st.code(summary)
-        
-        # ---- DEBUG INFO ----
-        with st.expander("🔍 Debug Information"):
-            st.json(metadata)
-            
-            st.markdown("### Processing Log")
-            st.code(f"""
-Input Validation: ✓
-Chunk Splitting: {metadata['total_chunks']} chunks
-Signal Threshold: {signal_threshold}
-Decision Threshold: {decision_threshold}
-Final Decision: {prediction} ({metadata['decision_reason']})
-            """)
         
 elif run_button:
     st.warning("⚠️ Please provide both narrative and backstory to begin analysis.")
@@ -549,7 +558,7 @@ elif run_button:
 st.divider()
 st.markdown("""
 <div style='text-align: center; color: #6b7280; padding: 1rem;'>
-    <p>BDH Continuous Reasoner • Track B Submission • Belief-Dynamics Hybrid Architecture</p>
+    <p>BDH Rule-Based Reasoner • Track B Submission • No external dependencies</p>
     <p>Decision derived from persistent internal state dynamics with explainable trajectory</p>
 </div>
 """, unsafe_allow_html=True)
