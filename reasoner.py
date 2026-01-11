@@ -17,20 +17,21 @@ Narrative evidence:
 Rules:
 - Clear alignment → score = 1
 - Partial alignment → score = 0.5
+- Neutral / descriptive → score = 0
 - Partial contradiction → score = -0.5
 - Clear contradiction → score = -1
 
 Respond ONLY with JSON:
 {{
-  "score": 1 | 0.5 | -0.5 | -1,
+  "score": 1 | 0.5 | 0 | -0.5 | -1,
   "claim": "short causal claim"
 }}
 """
 
     try:
         response = model.generate_content(prompt)
-
         raw = response.text if hasattr(response, "text") else ""
+
         match = re.search(r"\{[\s\S]*?\}", raw)
         if not match:
             raise ValueError("No JSON found")
@@ -42,15 +43,15 @@ Respond ONLY with JSON:
         return claim, score
 
     except Exception as e:
-        # 🔑 fallback ensures updates still happen
+        # ✅ Neutral fallback (NOT negative)
         print("Parse error:", e)
-        return "uncertain evidence", -0.5
+        return "uncertain evidence", 0.0
 
 
 def run_bdh_pipeline(model, narrative: str, backstory: str):
     state = BDHState()
 
-    # 🔥 FIX: sentence-level chunking
+    # ✅ Sentence-level chunking → visible trajectory
     chunks = [c.strip() for c in narrative.split(".") if c.strip()]
 
     for chunk in chunks:
@@ -61,7 +62,7 @@ def run_bdh_pipeline(model, narrative: str, backstory: str):
 
     final_score = state.global_score()
 
-    # 🔑 strict decision
-    prediction = 1 if final_score > 0 else 0
+    # 🔥 FINAL FIX: neutral is NOT contradiction
+    prediction = 1 if final_score >= 0 else 0
 
     return prediction, state
