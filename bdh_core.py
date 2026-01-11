@@ -29,7 +29,7 @@ class BDHState:
 
         self.nodes[claim].update(signal)
 
-        # 🔑 GLOBAL SCORE → visible graph always
+        # ✅ Use GLOBAL belief for graph (always visible)
         self.trajectory.append({
             "step": len(self.trajectory) + 1,
             "claim": claim,
