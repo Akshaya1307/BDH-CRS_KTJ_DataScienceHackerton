@@ -56,10 +56,7 @@ if run:
     else:
         with st.spinner("Running BDH belief-state updates…"):
             try:
-                result = run_bdh_pipeline(model, narrative, backstory)
-                if not result or not isinstance(result, tuple):
-                    raise RuntimeError("BDH pipeline returned invalid result")
-                prediction, state = result
+                prediction, state = run_bdh_pipeline(model, narrative, backstory)
             except Exception as e:
                 st.error("❌ An error occurred during reasoning.")
                 st.exception(e)
@@ -76,43 +73,33 @@ if run:
 
         # ---- TRAJECTORY ----
         st.subheader("📈 Belief-State Confidence Trajectory")
-        trajectory = getattr(state, "trajectory", [])
-
-        if trajectory:
-            df = pd.DataFrame(trajectory)
-
+        if state.trajectory:
+            df = pd.DataFrame(state.trajectory)
             if "step" not in df.columns:
                 df["step"] = range(1, len(df) + 1)
-
             if "current_score" not in df.columns:
                 df["current_score"] = 0.0
-
             st.line_chart(df.set_index("step")["current_score"])
         else:
             st.info("No significant belief updates recorded.")
 
         # ---- STATE UPDATES ----
         st.subheader("🧠 Incremental State Updates (BDH-style)")
-        if trajectory:
-            for i, t in enumerate(trajectory, start=1):
-                claim_text = t.get("claim", "Unknown Claim")
-                signal = t.get("signal", 0.0)
-                score = t.get("current_score", 0.0)
-                with st.expander(f"Chunk {i}: {claim_text}"):
+        if state.trajectory:
+            for i, t in enumerate(state.trajectory, start=1):
+                with st.expander(f"Chunk {i}: {t.get('claim', 'Unknown Claim')}"):
                     st.markdown(f"""
-                    **Signal:** `{signal}`  
-                    **Updated Score:** `{score}`
+                    **Signal:** `{t.get('signal', 0.0)}`  
+                    **Updated Score:** `{t.get('current_score', 0.0)}`
                     """)
         else:
             st.info("No incremental updates recorded.")
 
         # ---- BELIEF NODES ----
         st.subheader("🧩 Final Belief Nodes")
-        nodes = getattr(state, "nodes", {})
-
-        if nodes:
+        if state.nodes:
             rows = []
-            for claim, node in nodes.items():
+            for claim, node in state.nodes.items():
                 rows.append({
                     "Claim": claim,
                     "Support": node.support,
