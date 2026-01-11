@@ -56,7 +56,10 @@ if run:
     else:
         with st.spinner("Running BDH belief-state updates…"):
             try:
-                prediction, state = run_bdh_pipeline(model, narrative, backstory)
+                result = run_bdh_pipeline(model, narrative, backstory)
+                if not result or not isinstance(result, tuple):
+                    raise RuntimeError("BDH pipeline returned invalid result")
+                prediction, state = result
             except Exception as e:
                 st.error("❌ An error occurred during reasoning.")
                 st.exception(e)
@@ -66,29 +69,32 @@ if run:
 
         # ---- FINAL VERDICT ----
         st.subheader("✅ Final Consistency Judgment")
-        if prediction == 1:
+        if int(prediction) == 1:
             st.success("CONSISTENT (1)")
         else:
             st.error("CONTRADICT (0)")
 
         # ---- TRAJECTORY ----
         st.subheader("📈 Belief-State Confidence Trajectory")
-        if state.trajectory:
-            df = pd.DataFrame(state.trajectory)
-            # Ensure step exists for plotting
+        trajectory = getattr(state, "trajectory", [])
+
+        if trajectory:
+            df = pd.DataFrame(trajectory)
+
             if "step" not in df.columns:
                 df["step"] = range(1, len(df) + 1)
-            # Safe fallback if current_score missing
+
             if "current_score" not in df.columns:
-                df["current_score"] = df.get("claim_score", 0.0)
+                df["current_score"] = 0.0
+
             st.line_chart(df.set_index("step")["current_score"])
         else:
             st.info("No significant belief updates recorded.")
 
         # ---- STATE UPDATES ----
         st.subheader("🧠 Incremental State Updates (BDH-style)")
-        if state.trajectory:
-            for i, t in enumerate(state.trajectory, start=1):
+        if trajectory:
+            for i, t in enumerate(trajectory, start=1):
                 claim_text = t.get("claim", "Unknown Claim")
                 signal = t.get("signal", 0.0)
                 score = t.get("current_score", 0.0)
@@ -102,9 +108,11 @@ if run:
 
         # ---- BELIEF NODES ----
         st.subheader("🧩 Final Belief Nodes")
-        if getattr(state, "nodes", None) and state.nodes:
+        nodes = getattr(state, "nodes", {})
+
+        if nodes:
             rows = []
-            for claim, node in state.nodes.items():
+            for claim, node in nodes.items():
                 rows.append({
                     "Claim": claim,
                     "Support": node.support,
