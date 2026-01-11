@@ -90,7 +90,7 @@ with st.sidebar:
         "Minimum chunk length (words)",
         min_value=1,
         max_value=10,
-        value=3,
+        value=1,  # Changed from 3 to 1
         help="Minimum number of words per chunk to process"
     )
     
@@ -98,9 +98,9 @@ with st.sidebar:
         "Signal threshold",
         min_value=0.0,
         max_value=1.0,
-        value=0.1,
-        step=0.05,
-        help="Minimum absolute signal value to update beliefs"
+        value=0.01,  # Changed from 0.1 to 0.01
+        step=0.01,
+        help="Minimum absolute signal value to update beliefs (recommended: 0.01)"
     )
     
     decision_threshold = st.slider(
@@ -122,8 +122,8 @@ with st.sidebar:
     st.markdown("### Examples")
     example_choice = st.selectbox(
         "Load example",
-        ["None", "Loyal Friend", "Suspicious Behavior", "Career Change"],
-        index=0
+        ["None", "Loyal Friend", "Suspicious Behavior", "Career Change", "Simple Test"],
+        index=4  # Default to Simple Test
     )
     
     # Info section
@@ -141,7 +141,7 @@ with st.sidebar:
         """)
     
     st.divider()
-    st.caption(f"BDH Reasoner v1.2 • {datetime.now().strftime('%Y-%m-%d')}")
+    st.caption(f"BDH Reasoner v1.3 • {datetime.now().strftime('%Y-%m-%d')}")
 
 # --------------------- HEADER ---------------------
 st.markdown('<h1 class="main-header">🧠 BDH Continuous Reasoner</h1>', unsafe_allow_html=True)
@@ -176,6 +176,10 @@ examples = {
         She recently declined a promotion at her firm. Yesterday, she registered a business 
         license for an art gallery.""",
         "backstory": "Maria is preparing to leave her legal career to become a full-time artist."
+    },
+    "Simple Test": {
+        "narrative": "John helped his friend. This shows loyalty. He prioritized friendship.",
+        "backstory": "John is a loyal friend."
     }
 }
 
@@ -187,9 +191,7 @@ with col1:
     narrative = st.text_area(
         "Enter narrative text (events, actions, decisions):",
         height=280,
-        placeholder="""Example: The detective found fingerprints at the scene. 
-The suspect had no alibi for the night of the crime. 
-Witnesses reported seeing him arguing with the victim earlier that day.""",
+        placeholder="""Example: John helped his friend. This shows loyalty. He prioritized friendship.""",
         value=examples[example_choice]["narrative"],
         help="Enter the sequence of events or facts to analyze"
     )
@@ -205,8 +207,7 @@ with col2:
     backstory = st.text_area(
         "Describe character beliefs, motivations, or context:",
         height=280,
-        placeholder="""Example: The suspect is planning to frame someone else for the crime. 
-He has been collecting evidence against his colleague and planting false clues.""",
+        placeholder="""Example: John is a loyal friend.""",
         value=examples[example_choice]["backstory"],
         help="Enter the hypothetical context to evaluate the narrative against"
     )
@@ -234,7 +235,7 @@ with col_clear:
 
 with col_demo:
     if st.button("🎯 Quick Demo", use_container_width=True):
-        example = examples["Loyal Friend"]
+        example = examples["Simple Test"]
         narrative = example["narrative"]
         backstory = example["backstory"]
         run_button = True  # Trigger execution
@@ -360,12 +361,13 @@ if run_button and narrative.strip() and backstory.strip():
             st.metric("Chunks Processed", f"{metadata['processed_chunks']}/{metadata['total_chunks']}")
         
         with col3:
-            st.metric("Belief Density", f"{metadata.get('belief_density', 0):.1%}")
+            density = metadata.get('belief_density', 0)
+            st.metric("Belief Density", f"{density:.1%}")
         
         # ---- TRAJECTORY VISUALIZATION ----
         st.subheader("📈 Belief-State Trajectory")
         
-        if state.trajectory:
+        if state.trajectory and len(state.trajectory) > 0:
             df_traj = pd.DataFrame(state.trajectory)
             
             # Create interactive plot with Plotly
@@ -467,6 +469,8 @@ if run_button and narrative.strip() and backstory.strip():
                     )
                     fig_nodes.update_layout(height=400)
                     st.plotly_chart(fig_nodes, use_container_width=True)
+        else:
+            st.info("No belief nodes formed.")
         
         # ---- RAW DATA EXPORT ----
         st.subheader("💾 Export Results")
@@ -477,7 +481,7 @@ if run_button and narrative.strip() and backstory.strip():
             if st.button("📥 Download JSON", use_container_width=True):
                 # Clean metadata for export
                 clean_metadata = {k: v for k, v in metadata.items() 
-                                if k not in ['timestamp']}  # Remove timestamp if desired
+                                if k not in ['timestamp']}
                 
                 download_data = {
                     "metadata": clean_metadata,
