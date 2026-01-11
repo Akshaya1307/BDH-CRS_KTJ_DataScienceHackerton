@@ -3,10 +3,13 @@ import re
 from bdh_core import BDHState
 
 
+# =====================================================
+# Analyze a single narrative chunk
+# =====================================================
 def analyze_chunk(model, narrative_chunk: str, backstory: str):
     """
     Analyze a narrative chunk and return (claim, signal).
-    Prompt explicitly evaluates consistency vs contradiction.
+    Explicitly evaluates consistency vs contradiction.
     """
 
     prompt = f"""
@@ -44,7 +47,7 @@ Respond ONLY with valid JSON in this exact format:
 
         match = re.search(r"\{[\s\S]*?\}", raw)
         if not match:
-            raise ValueError("No JSON found")
+            raise ValueError("No JSON found in response")
 
         data = json.loads(match.group())
 
@@ -54,11 +57,13 @@ Respond ONLY with valid JSON in this exact format:
         return claim, score
 
     except Exception as e:
-        # Weak negative signal ensures traceability without domination
         print("Chunk parsing error:", e)
         return "unparseable_response", -0.1
 
 
+# =====================================================
+# BDH Continuous Reasoning Pipeline
+# =====================================================
 def run_bdh_pipeline(model, narrative: str, backstory: str):
     """
     Full BDH-style continuous reasoning pipeline.
@@ -66,7 +71,7 @@ def run_bdh_pipeline(model, narrative: str, backstory: str):
     """
 
     state = BDHState()
-    prediction = 0
+    prediction = 0  # safe default
 
     try:
         chunks = [c.strip() for c in narrative.split("\n\n") if c.strip()]
@@ -77,4 +82,23 @@ def run_bdh_pipeline(model, narrative: str, backstory: str):
         for chunk in chunks:
             claim, signal = analyze_chunk(model, chunk, backstory)
 
-            if abs(s
+            # ✅ THIS LINE WAS BROKEN BEFORE — NOW FIXED
+            if abs(signal) >= 0.1:
+                state.sparse_update(claim, signal)
+                update_count += 1
+
+        final_score = state.global_score()
+
+        # Neutral-friendly threshold
+        if update_count > 0:
+            prediction = 1 if final_score > -0.2 else 0
+        else:
+            prediction = 0
+
+        print("BDH updates:", update_count)
+        print("Final belief score:", final_score)
+
+    except Exception as e:
+        print("BDH pipeline error:", e)
+
+    return prediction, state
