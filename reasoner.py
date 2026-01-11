@@ -2,7 +2,6 @@ import re
 import nltk
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
-import random
 
 # Download nltk data if needed
 try:
@@ -161,7 +160,16 @@ def extract_keywords(text: str) -> List[str]:
     """Extract meaningful keywords from text."""
     # Remove common stopwords
     stopwords = {'a', 'an', 'the', 'and', 'or', 'but', 'is', 'was', 'were', 'be', 'been', 
-                 'to', 'of', 'in', 'for', 'with', 'on', 'at', 'by', 'from', 'as', 'that'}
+                 'to', 'of', 'in', 'for', 'with', 'on', 'at', 'by', 'from', 'as', 'that',
+                 'this', 'that', 'these', 'those', 'it', 'its', 'they', 'them', 'their',
+                 'he', 'him', 'his', 'she', 'her', 'i', 'me', 'my', 'we', 'us', 'our',
+                 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'should',
+                 'could', 'can', 'may', 'might', 'must', 'shall', 'not', 'no', 'yes',
+                 'so', 'then', 'than', 'just', 'only', 'also', 'very', 'too', 'much',
+                 'many', 'some', 'any', 'all', 'both', 'each', 'every', 'such', 'like',
+                 'about', 'above', 'below', 'under', 'over', 'through', 'between',
+                 'during', 'before', 'after', 'since', 'until', 'while', 'because',
+                 'although', 'though', 'even', 'if', 'unless', 'whether', 'while'}
     
     # Extract words
     words = re.findall(r'\b[a-z]{3,}\b', text.lower())
@@ -193,7 +201,7 @@ def calculate_alignment(backstory_keywords: List[str], narrative_keywords: List[
     
     # Adjust score based on contradictions
     if contradictions > 0:
-        return -jaccard * contradictions
+        return -jaccard * (1 + contradictions)
     else:
         return jaccard
 
@@ -205,12 +213,22 @@ def check_contradictions(backstory_words: set, narrative_words: set) -> float:
         {'love', 'hate'}, {'like', 'dislike'}, {'good', 'bad'}, {'happy', 'sad'},
         {'success', 'failure'}, {'win', 'lose'}, {'help', 'harm'}, {'friend', 'enemy'},
         {'trust', 'betray'}, {'honest', 'dishonest'}, {'loyal', 'disloyal'},
+        {'brave', 'cowardly'}, {'kind', 'cruel'}, {'generous', 'selfish'},
+        {'truth', 'lie'}, {'real', 'fake'}, {'sincere', 'insincere'},
         # Presence vs absence
         {'present', 'absent'}, {'here', 'gone'}, {'alive', 'dead'}, {'found', 'lost'},
+        {'exist', 'nonexistent'}, {'have', 'lack'}, {'full', 'empty'},
         # Ability vs inability
         {'can', 'cannot'}, {'able', 'unable'}, {'possible', 'impossible'},
+        {'capable', 'incapable'}, {'competent', 'incompetent'},
         # Truth vs falsehood
-        {'true', 'false'}, {'real', 'fake'}, {'truth', 'lie'}
+        {'true', 'false'}, {'real', 'fake'}, {'truth', 'lie'}, {'fact', 'fiction'},
+        {'accurate', 'inaccurate'}, {'correct', 'wrong'}, {'right', 'wrong'},
+        # Time-related contradictions
+        {'always', 'never'}, {'forever', 'temporary'}, {'permanent', 'temporary'},
+        # Quantity contradictions
+        {'all', 'none'}, {'every', 'no'}, {'complete', 'incomplete'},
+        {'many', 'few'}, {'most', 'least'}, {'more', 'less'}
     ]
     
     contradictions = 0
@@ -226,7 +244,7 @@ def check_contradictions(backstory_words: set, narrative_words: set) -> float:
             if backstory_word and narrative_word and backstory_word != narrative_word:
                 contradictions += 1
     
-    return min(contradictions / 3, 1.0)  # Normalize to 0-1
+    return min(contradictions / 5, 1.0)  # Normalize to 0-1
 
 
 def generate_claim(chunk: str, alignment: float) -> str:
@@ -266,7 +284,7 @@ def map_to_bdh_score(alignment: float) -> float:
 def run_bdh_pipeline(
     narrative: str, 
     backstory: str,
-    min_chunk_length: int = 1,
+    min_chunk_length: int = 2,
     signal_threshold: float = 0.01,
     decision_threshold: float = 0.05
 ) -> Tuple[int, BDHState, dict]:
