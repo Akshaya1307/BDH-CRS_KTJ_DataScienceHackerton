@@ -6,9 +6,8 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 import time
 from datetime import datetime
-from reasoner import run_bdh_pipeline, BDHState
+from reasoner import run_bdh_pipeline
 import json
-import sys
 
 # --------------------- PAGE CONFIG ---------------------
 st.set_page_config(
@@ -63,17 +62,27 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# --------------------- SAFETY CHECK ---------------------
+if "GEMINI_API_KEY" not in st.secrets:
+    st.error("❌ GEMINI_API_KEY not configured in Streamlit Secrets.")
+    st.stop()
+
+# --------------------- INITIALIZE MODEL ---------------------
+@st.cache_resource
+def load_model():
+    """Load and cache the Gemini model."""
+    try:
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        return genai.GenerativeModel("gemini-1.5-flash")
+    except Exception as e:
+        st.error(f"❌ Failed to load model: {e}")
+        st.stop()
+
+model = load_model()
+
 # --------------------- SIDEBAR ---------------------
 with st.sidebar:
     st.markdown("## ⚙️ Configuration")
-    
-    # Model settings
-    model_options = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.0-pro"]
-    selected_model = st.selectbox(
-        "Model Version",
-        model_options,
-        index=0
-    )
     
     # Analysis parameters
     st.markdown("### Analysis Parameters")
@@ -143,23 +152,6 @@ Track B: Belief-Dynamics Hybrid reasoning with persistent internal state
 """, unsafe_allow_html=True)
 
 st.divider()
-
-# --------------------- INITIALIZE MODEL ---------------------
-@st.cache_resource
-def load_model(model_name: str):
-    """Load and cache the Gemini model."""
-    if "GEMINI_API_KEY" not in st.secrets:
-        st.error("❌ GEMINI_API_KEY not configured in Streamlit Secrets.")
-        st.stop()
-    
-    try:
-        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        return genai.GenerativeModel(model_name)
-    except Exception as e:
-        st.error(f"❌ Failed to load model: {e}")
-        st.stop()
-
-model = load_model(selected_model)
 
 # --------------------- EXAMPLE DATA ---------------------
 examples = {
@@ -292,7 +284,7 @@ if run_button and narrative.strip() and backstory.strip():
             # Update metadata
             metadata["processing_time"] = processing_time
             metadata["timestamp"] = datetime.now().isoformat()
-            metadata["model"] = selected_model
+            metadata["model"] = "gemini-1.5-flash"
             
             # Store results
             st.session_state.results = {
