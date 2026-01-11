@@ -284,7 +284,6 @@ if run_button and narrative.strip() and backstory.strip():
             # Update metadata
             metadata["processing_time"] = processing_time
             metadata["timestamp"] = datetime.now().isoformat()
-            metadata["model"] = "gemini-1.5-flash"
             
             # Store results
             st.session_state.results = {
@@ -352,19 +351,16 @@ if run_button and narrative.strip() and backstory.strip():
         # ---- METRICS DASHBOARD ----
         st.subheader("📊 Analysis Metrics")
         
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3 = st.columns(3)
         
         with col1:
             st.metric("Processing Time", f"{metadata['processing_time']:.2f}s")
         
         with col2:
-            st.metric("Total Chunks", metadata['total_chunks'])
+            st.metric("Chunks Processed", f"{metadata['processed_chunks']}/{metadata['total_chunks']}")
         
         with col3:
-            st.metric("Belief Nodes", metadata['belief_nodes'])
-        
-        with col4:
-            st.metric("Model", metadata['model'])
+            st.metric("Belief Density", f"{metadata.get('belief_density', 0):.1%}")
         
         # ---- TRAJECTORY VISUALIZATION ----
         st.subheader("📈 Belief-State Trajectory")
@@ -479,9 +475,12 @@ if run_button and narrative.strip() and backstory.strip():
         
         with col_export1:
             if st.button("📥 Download JSON", use_container_width=True):
-                # Create download data
+                # Clean metadata for export
+                clean_metadata = {k: v for k, v in metadata.items() 
+                                if k not in ['timestamp']}  # Remove timestamp if desired
+                
                 download_data = {
-                    "metadata": metadata,
+                    "metadata": clean_metadata,
                     "prediction": prediction,
                     "trajectory": state.trajectory,
                     "nodes": {k: v.__dict__ for k, v in state.nodes.items()}
@@ -520,8 +519,9 @@ BDH Analysis Summary:
 - Normalized Score: {metadata['normalized_score']:.3f}
 - Confidence: {metadata['confidence_score']:.3f}
 - Processing Time: {metadata['processing_time']:.2f}s
-- Chunks Analyzed: {metadata['total_chunks']}
+- Chunks Analyzed: {metadata['total_chunks']} (processed: {metadata['processed_chunks']})
 - Belief Nodes: {metadata['belief_nodes']}
+- Belief Density: {metadata.get('belief_density', 0):.1%}
                 """
                 st.code(summary)
         
@@ -535,7 +535,6 @@ Input Validation: ✓
 Chunk Splitting: {metadata['total_chunks']} chunks
 Signal Threshold: {signal_threshold}
 Decision Threshold: {decision_threshold}
-Model: {metadata['model']}
 Final Decision: {prediction} ({metadata['decision_reason']})
             """)
         
