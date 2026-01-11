@@ -5,7 +5,7 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 import time
 from datetime import datetime
-from reasoner import run_bdh_pipeline
+from reasoner import run_bdh_pipeline, extract_keywords
 import json
 
 # --------------------- PAGE CONFIG ---------------------
@@ -477,8 +477,6 @@ if run_button and narrative.strip() and backstory.strip():
             st.markdown("### Keyword Analysis")
             
             # Extract and display keywords
-            from reasoner import extract_keywords
-            
             backstory_keywords = extract_keywords(backstory)
             narrative_keywords = extract_keywords(narrative)
             
