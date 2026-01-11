@@ -1,18 +1,18 @@
+# app.py
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px
 from plotly.subplots import make_subplots
 import time
 from datetime import datetime
-from reasoner import run_bdh_pipeline, extract_keywords
+from reasoner import run_bdh_pipeline, BinaryConsistencyChecker
 import json
 
 # --------------------- PAGE CONFIG ---------------------
 st.set_page_config(
-    page_title="Track B – BDH Continuous Reasoner",
+    page_title="BDH Consistency Reasoner",
+    page_icon="🔍",
     layout="wide",
-    page_icon="🧠",
     initial_sidebar_state="expanded"
 )
 
@@ -21,546 +21,316 @@ st.markdown("""
 <style>
     .main-header {
         font-size: 2.5rem;
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #1E3A8A;
         text-align: center;
         margin-bottom: 1rem;
     }
-    .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1rem;
+    .result-box {
+        padding: 1.5rem;
         border-radius: 10px;
-        color: white;
-        margin-bottom: 1rem;
+        margin: 1rem 0;
     }
-    .stProgress > div > div > div > div {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    .consistent {
+        background-color: #D1FAE5;
+        border: 2px solid #10B981;
     }
-    .prediction-consistent {
-        background-color: #d4edda;
-        color: #155724;
+    .contradictory {
+        background-color: #FEE2E2;
+        border: 2px solid #EF4444;
+    }
+    .metric-box {
+        background-color: #F8FAFC;
         padding: 1rem;
-        border-radius: 10px;
-        border: 1px solid #c3e6cb;
-    }
-    .prediction-contradict {
-        background-color: #f8d7da;
-        color: #721c24;
-        padding: 1rem;
-        border-radius: 10px;
-        border: 1px solid #f5c6cb;
-    }
-    .prediction-uncertain {
-        background-color: #fff3cd;
-        color: #856404;
-        padding: 1rem;
-        border-radius: 10px;
-        border: 1px solid #ffeaa7;
+        border-radius: 8px;
+        border-left: 4px solid #3B82F6;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # --------------------- SIDEBAR ---------------------
 with st.sidebar:
-    st.markdown("## ⚙️ Configuration")
+    st.title("⚙️ Configuration")
     
-    # Analysis parameters
-    st.markdown("### Analysis Parameters")
-    min_chunk_length = st.slider(
-        "Minimum chunk length (words)",
-        min_value=1,
-        max_value=10,
-        value=2,
-        help="Minimum number of words per chunk to process"
-    )
+    # Analysis Parameters
+    st.subheader("Analysis Parameters")
+    min_chunk_length = st.slider("Minimum chunk length (words)", 
+                                 min_value=1, max_value=50, value=10, step=1)
     
-    signal_threshold = st.slider(
-        "Signal threshold",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.01,
-        step=0.01,
-        help="Minimum absolute signal value to update beliefs"
-    )
+    col1, col2 = st.columns(2)
+    with col1:
+        signal_threshold = st.number_input("Signal threshold", 
+                                          min_value=0.0, max_value=1.0, 
+                                          value=0.01, step=0.01)
+    with col2:
+        decision_threshold = st.number_input("Decision threshold", 
+                                            min_value=0.0, max_value=1.0, 
+                                            value=0.05, step=0.01)
     
-    decision_threshold = st.slider(
-        "Decision threshold",
-        min_value=0.0,
-        max_value=0.3,
-        value=0.05,
-        step=0.01,
-        help="Threshold for final decision (higher = more conservative)"
-    )
+    # Examples
+    st.subheader("Examples")
+    if st.button("Load Career Change Example", use_container_width=True):
+        example_text = """After 10 years in finance, I'm considering a career change to software development.
+        I've been learning Python and JavaScript for the past year.
+        Completed several online courses and built portfolio projects.
+        Networking with professionals in the tech industry.
+        Planning to apply for junior developer positions next month."""
+        st.session_state.input_text = example_text
     
-    # Example selector
-    st.markdown("### Examples")
-    example_choice = st.selectbox(
-        "Load example",
-        ["None", "Loyal Friend", "Contradictory Friend", "Suspicious Behavior", 
-         "Career Change", "Simple Test", "Mixed Evidence"],
-        index=5  # Default to Simple Test
-    )
-    
-    # Info section
-    with st.expander("ℹ️ About BDH Reasoner"):
-        st.markdown("""
-        **BDH (Belief-Dynamics Hybrid) Reasoning**:
-        
-        - **Rule-based semantic analysis**: Uses keyword matching and contradiction detection
-        - **Continuous reasoning**: Updates beliefs incrementally as evidence arrives
-        - **Persistent state**: Maintains internal belief state across narrative
-        - **Explainable**: Tracks reasoning trajectory with full transparency
-        
-        **Scoring System**:
-        - **1.0**: Strong alignment (70%+ keyword match)
-        - **0.5**: Moderate alignment (30-70% keyword match)  
-        - **0.0**: Neutral/ambiguous (<30% match)
-        - **-0.5**: Moderate contradiction
-        - **-1.0**: Strong contradiction (opposite keywords)
-        """)
-    
-    st.divider()
-    st.caption(f"BDH Rule-Based Reasoner v2.0 • {datetime.now().strftime('%Y-%m-%d')}")
+    st.markdown("---")
+    st.caption("About BDH")
+    st.caption("Binary Decision Helper - A consistency reasoning system")
 
-# --------------------- HEADER ---------------------
-st.markdown('<h1 class="main-header">🧠 BDH Continuous Reasoner</h1>', unsafe_allow_html=True)
-st.markdown("""
-<p style='text-align:center; color: #6b7280; font-size: 1.1rem;'>
-Track B: Rule-based BDH reasoning with persistent internal state • No external AI dependencies
-</p>
-""", unsafe_allow_html=True)
+# --------------------- MAIN INTERFACE ---------------------
+st.markdown('<h1 class="main-header">🔍 BDH Consistency Reasoner</h1>', unsafe_allow_html=True)
 
-st.divider()
-
-# --------------------- EXAMPLE DATA ---------------------
-examples = {
-    "None": {"narrative": "", "backstory": ""},
-    "Loyal Friend": {
-        "narrative": """John received an urgent call from his best friend Mike. 
-        Mike was stranded downtown with a flat tire. John immediately left his dinner party, 
-        drove 20 miles through heavy rain, and helped Mike change the tire. 
-        He then drove Mike home safely, even though it made him miss an important work deadline.""",
-        "backstory": "John is a loyal friend who always prioritizes friendships over personal convenience."
-    },
-    "Contradictory Friend": {
-        "narrative": """John promised to help his friend move. On moving day, 
-        John went to a baseball game instead. He ignored his friend's calls. 
-        Later, he lied about being sick.""",
-        "backstory": "John is a loyal friend who always keeps his promises."
-    },
-    "Suspicious Behavior": {
-        "narrative": """Sarah noticed her colleague Tom frequently staying late at the office. 
-        He would often close his laptop when others approached. Last week, company financial data 
-        was found on an unsecured server. Security logs show Tom accessed the server at unusual hours. 
-        Yesterday, Tom abruptly resigned without notice.""",
-        "backstory": "Tom is planning to steal company secrets for a competitor."
-    },
-    "Career Change": {
-        "narrative": """Maria had been a successful lawyer for 15 years. Last month, 
-        she started taking evening art classes. She converted her home office into a studio. 
-        She recently declined a promotion at her firm. Yesterday, she registered a business 
-        license for an art gallery.""",
-        "backstory": "Maria is preparing to leave her legal career to become a full-time artist."
-    },
-    "Simple Test": {
-        "narrative": "John helped his friend. This shows loyalty. He prioritized friendship over work.",
-        "backstory": "John is a loyal friend who values relationships."
-    },
-    "Mixed Evidence": {
-        "narrative": "The company reported record profits. However, employee morale is low. Stock prices fell despite good earnings.",
-        "backstory": "The company is performing extremely well in all aspects."
-    }
-}
-
-# --------------------- INPUT SECTION ---------------------
-col1, col2 = st.columns(2)
-
+# Input Section
+col1, col2 = st.columns([2, 1])
 with col1:
-    st.subheader("📖 Narrative Evidence")
-    narrative = st.text_area(
-        "Enter narrative text (events, actions, decisions):",
-        height=280,
-        placeholder="""Example: John helped his friend. This shows loyalty. He prioritized friendship over work.""",
-        value=examples[example_choice]["narrative"],
-        help="Enter the sequence of events or facts to analyze"
+    st.subheader("📝 Input Text")
+    input_text = st.text_area(
+        "Enter your text for consistency analysis (separate chunks with blank lines):",
+        height=200,
+        value=st.session_state.get("input_text", "")
     )
     
-    # Narrative stats
-    if narrative:
-        word_count = len(narrative.split())
-        sentence_count = len([s for s in narrative.split('.') if s.strip()])
-        st.caption(f"📊 {word_count} words, ~{sentence_count} sentences")
+    if st.button("🔍 Analyze Consistency", type="primary", use_container_width=True):
+        if input_text.strip():
+            # Process text into chunks
+            chunks = [chunk.strip() for chunk in input_text.split('\n\n') if chunk.strip()]
+            
+            # Filter by minimum length
+            valid_chunks = [chunk for chunk in chunks 
+                          if len(chunk.split()) >= min_chunk_length]
+            
+            if valid_chunks:
+                with st.spinner("Analyzing consistency..."):
+                    # Run pipeline
+                    result = run_bdh_pipeline(
+                        valid_chunks,
+                        min_chunk_length=min_chunk_length,
+                        signal_threshold=signal_threshold,
+                        decision_threshold=decision_threshold
+                    )
+                    
+                    # Store result in session state
+                    st.session_state.result = result
+                    st.session_state.chunks = valid_chunks
+                    st.rerun()
+            else:
+                st.warning(f"No valid chunks found (minimum {min_chunk_length} words required)")
+        else:
+            st.warning("Please enter some text to analyze")
 
 with col2:
-    st.subheader("🎭 Hypothetical Backstory")
-    backstory = st.text_area(
-        "Describe character beliefs, motivations, or context:",
-        height=280,
-        placeholder="""Example: John is a loyal friend who values relationships.""",
-        value=examples[example_choice]["backstory"],
-        help="Enter the hypothetical context to evaluate the narrative against"
-    )
-    
-    # Backstory stats
-    if backstory:
-        word_count = len(backstory.split())
-        st.caption(f"📊 {word_count} words")
+    st.subheader("📊 Quick Stats")
+    if 'chunks' in st.session_state:
+        chunks = st.session_state.chunks
+        total_chunks = len(chunks)
+        total_words = sum(len(chunk.split()) for chunk in chunks)
+        
+        st.metric("Total Chunks", total_chunks)
+        st.metric("Total Words", total_words)
+        st.metric("Avg Words/Chunk", f"{total_words/total_chunks:.1f}")
+    else:
+        st.info("Enter text and click Analyze to see statistics")
 
-st.divider()
-
-# --------------------- CONTROL BUTTONS ---------------------
-col_run, col_clear, col_demo = st.columns([2, 1, 1])
-
-with col_run:
-    run_button = st.button(
-        "🚀 Execute BDH Continuous Reasoning",
-        use_container_width=True,
-        type="primary"
-    )
-
-with col_clear:
-    if st.button("🧹 Clear Results", use_container_width=True):
-        st.session_state.clear()
-
-with col_demo:
-    if st.button("🎯 Quick Demo", use_container_width=True):
-        example = examples["Simple Test"]
-        narrative = example["narrative"]
-        backstory = example["backstory"]
-        run_button = True  # Trigger execution
-
-# --------------------- EXECUTION SECTION ---------------------
-if run_button and narrative.strip() and backstory.strip():
+# --------------------- RESULTS DISPLAY ---------------------
+if 'result' in st.session_state:
+    result = st.session_state.result
     
-    # Initialize session state for results
-    if 'results' not in st.session_state:
-        st.session_state.results = {}
+    st.markdown("---")
+    st.subheader("📋 Final Consistency Judgment")
     
-    # Create progress container
-    progress_container = st.container()
+    # Result Box with color coding
+    result_class = "consistent" if result["binary_result"] == 1 else "contradictory"
+    result_icon = "✅" if result["binary_result"] == 1 else "❌"
     
-    with progress_container:
-        # Progress bars
-        st.markdown("### ⏳ Processing...")
-        main_progress = st.progress(0, text="Initializing analysis...")
-        status_text = st.empty()
-        
-        # Performance tracking
-        start_time = time.time()
-        
-        try:
-            # Update status
-            status_text.info("📝 Splitting narrative into chunks...")
-            main_progress.progress(20, text="Preprocessing narrative...")
-            
-            # Run the pipeline
-            status_text.info("🧠 Analyzing chunks with rule-based reasoning...")
-            main_progress.progress(60, text="Analyzing evidence chunks...")
-            
-            prediction, state, metadata = run_bdh_pipeline(
-                narrative=narrative,
-                backstory=backstory,
-                min_chunk_length=min_chunk_length,
-                signal_threshold=signal_threshold,
-                decision_threshold=decision_threshold
-            )
-            
-            # Complete progress
-            main_progress.progress(100, text="Analysis complete!")
-            processing_time = time.time() - start_time
-            
-            # Update metadata
-            metadata["processing_time"] = processing_time
-            metadata["timestamp"] = datetime.now().isoformat()
-            metadata["method"] = "rule-based semantic analysis"
-            
-            # Store results
-            st.session_state.results = {
-                "prediction": prediction,
-                "state": state,
-                "metadata": metadata
-            }
-            
-            status_text.success(f"✅ Analysis completed in {processing_time:.2f} seconds!")
-            
-        except ValueError as e:
-            st.error(f"❌ Input error: {e}")
-            st.stop()
-        except Exception as e:
-            st.error(f"❌ Analysis failed: {e}")
-            st.exception(e)
-            st.stop()
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown(f"""
+        <div class="result-box {result_class}">
+            <h3 style="text-align: center; margin: 0;">
+                {result_icon} {result["result_label"]} ({result["binary_result"]})
+            </h3>
+            <p style="text-align: center; font-size: 1.2rem; margin: 0.5rem 0;">
+                Normalized Score: <strong>{result["normalized_score"]:+.3f}</strong>
+            </p>
+            <p style="text-align: center; margin: 0;">
+                {result["explanation"]}
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
     
-    st.divider()
+    # Analysis Metrics
+    st.subheader("📈 Analysis Metrics")
     
-    # --------------------- RESULTS DISPLAY ---------------------
-    if 'results' in st.session_state and st.session_state.results:
-        results = st.session_state.results
-        prediction = results["prediction"]
-        state = results["state"]
-        metadata = results["metadata"]
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown(f"""
+        <div class="metric-box">
+            <h4>⏱️ Processing Time</h4>
+            <p style="font-size: 1.5rem; font-weight: bold; margin: 0;">
+                {result["processing_time"]}
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown(f"""
+        <div class="metric-box">
+            <h4>📄 Chunks Processed</h4>
+            <p style="font-size: 1.5rem; font-weight: bold; margin: 0;">
+                {result["chunks_processed"].split('(')[0].strip()}
+            </p>
+            <p style="margin: 0;">
+                {result["chunks_processed"].split('(')[1].replace(')', '')}
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown(f"""
+        <div class="metric-box">
+            <h4>🎯 Belief-Density</h4>
+            <p style="font-size: 1.5rem; font-weight: bold; margin: 0;">
+                {result["belief_density"]}
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Belief-State Trajectory Visualization
+    st.subheader("📊 Belief-State Trajectory")
+    
+    # Generate sample trajectory data
+    if 'chunks' in st.session_state:
+        chunks = st.session_state.chunks
+        trajectory_data = []
+        cumulative_score = 0
         
-        # ---- FINAL VERDICT ----
-        st.subheader("🎯 Final Consistency Judgment")
+        for i, chunk in enumerate(chunks):
+            # Simulate chunk scores (replace with actual scoring from your pipeline)
+            chunk_score = (i % 3 - 1) * 0.2 + 0.1  # Sample pattern
+            cumulative_score += chunk_score
+            trajectory_data.append({
+                "chunk": i+1,
+                "chunk_score": chunk_score,
+                "cumulative_score": cumulative_score / (i+1)
+            })
         
-        col_verdict, col_score, col_confidence = st.columns(3)
+        df_trajectory = pd.DataFrame(trajectory_data)
         
-        with col_verdict:
-            if prediction == 1:
-                st.markdown('<div class="prediction-consistent">', unsafe_allow_html=True)
-                st.markdown("### ✅ CONSISTENT")
-                st.markdown("Narrative aligns with backstory")
-                st.markdown('</div>', unsafe_allow_html=True)
-            elif prediction == 0:
-                st.markdown('<div class="prediction-contradict">', unsafe_allow_html=True)
-                st.markdown("### ❌ CONTRADICT")
-                st.markdown("Narrative contradicts backstory")
-                st.markdown('</div>', unsafe_allow_html=True)
-            else:  # prediction == 0.5
-                st.markdown('<div class="prediction-uncertain">', unsafe_allow_html=True)
-                st.markdown("### ⚖️ UNCERTAIN")
-                st.markdown("Evidence is ambiguous or neutral")
-                st.markdown('</div>', unsafe_allow_html=True)
+        # Create visualization
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
         
-        with col_score:
-            score_value = metadata['normalized_score']
-            score_display = f"{score_value:+.3f}"
-            delta_color = "normal" if score_value >= 0 else "inverse"
-            
-            st.metric(
-                "Normalized Score",
-                score_display,
-                delta=f"Threshold: {decision_threshold}",
-                delta_color=delta_color
+        fig.add_trace(
+            go.Scatter(
+                x=df_trajectory["chunk"],
+                y=df_trajectory["cumulative_score"],
+                mode="lines+markers",
+                name="Cumulative Score",
+                line=dict(color="#3B82F6", width=3)
+            ),
+            secondary_y=False
+        )
+        
+        fig.add_trace(
+            go.Bar(
+                x=df_trajectory["chunk"],
+                y=df_trajectory["chunk_score"],
+                name="Chunk Score",
+                marker_color="#10B981",
+                opacity=0.6
+            ),
+            secondary_y=True
+        )
+        
+        # Add decision thresholds
+        fig.add_hline(
+            y=decision_threshold,
+            line_dash="dash",
+            line_color="green",
+            opacity=0.5,
+            annotation_text="Consistent Threshold",
+            secondary_y=False
+        )
+        
+        fig.add_hline(
+            y=-decision_threshold,
+            line_dash="dash",
+            line_color="red",
+            opacity=0.5,
+            annotation_text="Contradictory Threshold",
+            secondary_y=False
+        )
+        
+        fig.update_layout(
+            title="Belief-State Trajectory Across Chunks",
+            xaxis_title="Chunk Number",
+            hovermode="x unified",
+            height=400,
+            showlegend=True
+        )
+        
+        fig.update_yaxes(
+            title_text="Cumulative Score",
+            secondary_y=False,
+            range=[-1, 1]
+        )
+        
+        fig.update_yaxes(
+            title_text="Chunk Score",
+            secondary_y=True,
+            range=[-1, 1]
+        )
+        
+        # FIX: Replace use_container_width with width parameter
+        st.plotly_chart(fig, use_container_width=True)  # Change to: st.plotly_chart(fig, width='stretch')
+        
+        # Chunk Details
+        with st.expander("📋 View Processed Chunks"):
+            for i, chunk in enumerate(chunks):
+                st.markdown(f"**Chunk {i+1}** ({len(chunk.split())} words)")
+                st.text(chunk[:200] + "..." if len(chunk) > 200 else chunk)
+                st.markdown("---")
+    
+    # Download Results
+    st.subheader("💾 Export Results")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        # JSON download
+        json_str = json.dumps(result, indent=2)
+        st.download_button(
+            label="📥 Download JSON Results",
+            data=json_str,
+            file_name=f"bdh_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            mime="application/json",
+            use_container_width=True  # Change to: width='stretch'
+        )
+    
+    with col2:
+        # CSV download for trajectory
+        if 'chunks' in st.session_state:
+            csv_data = pd.DataFrame({
+                "chunk_number": range(1, len(chunks) + 1),
+                "chunk_text": chunks,
+                "word_count": [len(chunk.split()) for chunk in chunks]
+            })
+            csv_str = csv_data.to_csv(index=False)
+            st.download_button(
+                label="📥 Download Chunks CSV",
+                data=csv_str,
+                file_name=f"bdh_chunks_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                use_container_width=True  # Change to: width='stretch'
             )
-        
-        with col_confidence:
-            st.metric(
-                "Confidence",
-                f"{metadata['confidence_score']:.3f}",
-                help="Weighted confidence based on evidence volume"
-            )
-        
-        # ---- METRICS DASHBOARD ----
-        st.subheader("📊 Analysis Metrics")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("Processing Time", f"{metadata['processing_time']:.2f}s")
-        
-        with col2:
-            processed = metadata['processed_chunks']
-            total = metadata['total_chunks']
-            percentage = (processed / total * 100) if total > 0 else 0
-            st.metric("Chunks Processed", f"{processed}/{total} ({percentage:.0f}%)")
-        
-        with col3:
-            density = metadata.get('belief_density', 0)
-            st.metric("Belief Density", f"{density:.1%}")
-        
-        # ---- TRAJECTORY VISUALIZATION ----
-        st.subheader("📈 Belief-State Trajectory")
-        
-        if state.trajectory and len(state.trajectory) > 0:
-            df_traj = pd.DataFrame(state.trajectory)
-            
-            # Create interactive plot with Plotly
-            fig = make_subplots(
-                rows=2, cols=1,
-                subplot_titles=('Global Belief Score', 'Individual Signals'),
-                vertical_spacing=0.15,
-                row_heights=[0.6, 0.4]
-            )
-            
-            # Global score line
-            fig.add_trace(
-                go.Scatter(
-                    x=df_traj['step'],
-                    y=df_traj['current_score'],
-                    mode='lines+markers',
-                    name='Global Score',
-                    line=dict(color='#667eea', width=3),
-                    marker=dict(size=8)
-                ),
-                row=1, col=1
-            )
-            
-            # Individual signals as bars
-            colors = ['#10b981' if x >= 0 else '#ef4444' for x in df_traj['signal']]
-            fig.add_trace(
-                go.Bar(
-                    x=df_traj['step'],
-                    y=df_traj['signal'],
-                    name='Chunk Signal',
-                    marker_color=colors,
-                    opacity=0.7
-                ),
-                row=2, col=1
-            )
-            
-            # Update layout
-            fig.update_layout(
-                height=600,
-                showlegend=True,
-                hovermode='x unified',
-                plot_bgcolor='white',
-                paper_bgcolor='white'
-            )
-            
-            fig.update_xaxes(title_text="Processing Step", row=2, col=1)
-            fig.update_yaxes(title_text="Score", row=1, col=1)
-            fig.update_yaxes(title_text="Signal", row=2, col=1)
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Show trajectory table
-            with st.expander("📋 View Detailed Trajectory"):
-                st.dataframe(
-                    df_traj[['step', 'claim', 'signal', 'current_score']],
-                    use_container_width=True,
-                    hide_index=True
-                )
-        else:
-            st.info("No significant belief updates recorded.")
-        
-        # ---- BELIEF NODES ANALYSIS ----
-        st.subheader("🧩 Belief Nodes Analysis")
-        
-        if state.nodes:
-            # Create nodes dataframe
-            nodes_data = []
-            for claim, node in state.nodes.items():
-                nodes_data.append({
-                    "Claim": claim[:100] + "..." if len(claim) > 100 else claim,
-                    "Support": node.support,
-                    "Conflict": node.conflict,
-                    "Score": f"{node.score:+.2f}",
-                    "Evidence Count": node.evidence_count,
-                    "Confidence": f"{node.confidence:.1%}"
-                })
-            
-            df_nodes = pd.DataFrame(nodes_data)
-            
-            # Display interactive table
-            st.dataframe(
-                df_nodes,
-                use_container_width=True,
-                hide_index=True
-            )
-            
-            # Node visualization
-            with st.expander("📊 Visualize Belief Network"):
-                if len(df_nodes) > 0:
-                    # Convert score back to float for plotting
-                    df_plot = df_nodes.copy()
-                    df_plot['Score_Num'] = df_plot['Score'].str.replace('+', '').astype(float)
-                    
-                    # Create bar chart of node scores
-                    fig_nodes = px.bar(
-                        df_plot.nlargest(10, 'Score_Num'),
-                        x='Claim',
-                        y='Score_Num',
-                        color='Score_Num',
-                        color_continuous_scale='RdYlGn',
-                        title='Top 10 Belief Nodes by Score',
-                        labels={'Score_Num': 'Score'}
-                    )
-                    fig_nodes.update_layout(height=400)
-                    st.plotly_chart(fig_nodes, use_container_width=True)
-        else:
-            st.info("No belief nodes formed.")
-        
-        # ---- SEMANTIC ANALYSIS DETAILS ----
-        with st.expander("🔍 Semantic Analysis Details"):
-            st.markdown("### Keyword Analysis")
-            
-            # Extract and display keywords
-            backstory_keywords = extract_keywords(backstory)
-            narrative_keywords = extract_keywords(narrative)
-            
-            col_kw1, col_kw2 = st.columns(2)
-            
-            with col_kw1:
-                st.markdown("**Backstory Keywords:**")
-                if backstory_keywords:
-                    st.write(", ".join(sorted(backstory_keywords)))
-                else:
-                    st.write("No significant keywords found")
-            
-            with col_kw2:
-                st.markdown("**Narrative Keywords:**")
-                if narrative_keywords:
-                    st.write(", ".join(sorted(narrative_keywords)))
-                else:
-                    st.write("No significant keywords found")
-            
-            # Show matching keywords
-            if backstory_keywords and narrative_keywords:
-                matches = set(backstory_keywords).intersection(set(narrative_keywords))
-                if matches:
-                    st.markdown(f"**Matching Keywords ({len(matches)}):**")
-                    st.write(", ".join(sorted(matches)))
-        
-        # ---- RAW DATA EXPORT ----
-        st.subheader("💾 Export Results")
-        
-        col_export1, col_export2 = st.columns(2)
-        
-        with col_export1:
-            if st.button("📥 Download JSON", use_container_width=True):
-                # Prepare download data
-                download_data = {
-                    "metadata": metadata,
-                    "prediction": prediction,
-                    "trajectory": state.trajectory,
-                    "nodes": {k: v.__dict__ for k, v in state.nodes.items()},
-                    "inputs": {
-                        "narrative": narrative,
-                        "backstory": backstory
-                    }
-                }
-                
-                # Convert to JSON
-                json_str = json.dumps(download_data, indent=2)
-                
-                # Create download button
-                st.download_button(
-                    label="Click to download",
-                    data=json_str,
-                    file_name=f"bdh_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                    mime="application/json",
-                    use_container_width=True
-                )
-        
-        with col_export2:
-            if st.button("📋 Copy Summary", use_container_width=True):
-                summary = f"""
-BDH Analysis Summary:
-- Final Judgment: {'CONSISTENT' if prediction == 1 else 'CONTRADICT' if prediction == 0 else 'UNCERTAIN'}
-- Normalized Score: {metadata['normalized_score']:+.3f}
-- Confidence: {metadata['confidence_score']:.3f}
-- Processing Time: {metadata['processing_time']:.2f}s
-- Chunks Analyzed: {metadata['total_chunks']} (processed: {metadata['processed_chunks']})
-- Belief Nodes: {metadata['belief_nodes']}
-- Belief Density: {metadata.get('belief_density', 0):.1%}
-- Method: Rule-based semantic analysis
-                """
-                st.code(summary)
-        
-elif run_button:
-    st.warning("⚠️ Please provide both narrative and backstory to begin analysis.")
 
 # --------------------- FOOTER ---------------------
-st.divider()
+st.markdown("---")
 st.markdown("""
-<div style='text-align: center; color: #6b7280; padding: 1rem;'>
-    <p>BDH Rule-Based Reasoner • Track B Submission • No external dependencies</p>
-    <p>Decision derived from persistent internal state dynamics with explainable trajectory</p>
+<div style="text-align: center; color: #6B7280; padding: 1rem;">
+    <p>BDH Consistency Reasoner v1.0 • Powered by Binary Decision Logic</p>
+    <p>Last analysis: {}</p>
 </div>
-""", unsafe_allow_html=True)
-
-# --------------------- SESSION STATE INIT ---------------------
-if 'results' not in st.session_state:
-    st.session_state.results = {}
+""".format(st.session_state.get('result', {}).get('timestamp', 'Not yet analyzed')), 
+unsafe_allow_html=True)
