@@ -42,14 +42,16 @@ Respond ONLY with JSON:
         return claim, score
 
     except Exception as e:
+        # 🔑 fallback ensures updates still happen
         print("Parse error:", e)
-        return "uncertain evidence", -0.5   # 🔑 NOT ZERO
+        return "uncertain evidence", -0.5
 
 
 def run_bdh_pipeline(model, narrative: str, backstory: str):
     state = BDHState()
 
-    chunks = [c.strip() for c in narrative.split("\n\n") if c.strip()]
+    # 🔥 FIX: sentence-level chunking
+    chunks = [c.strip() for c in narrative.split(".") if c.strip()]
 
     for chunk in chunks:
         claim, signal = analyze_chunk(model, chunk, backstory)
@@ -59,7 +61,7 @@ def run_bdh_pipeline(model, narrative: str, backstory: str):
 
     final_score = state.global_score()
 
-    # 🔑 STRICTER (fixes both tests showing CONSISTENT)
+    # 🔑 strict decision
     prediction = 1 if final_score > 0 else 0
 
     return prediction, state
