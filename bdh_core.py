@@ -1,6 +1,9 @@
 from dataclasses import dataclass, field
 from typing import Dict, List
 
+# =========================
+# Belief Node
+# =========================
 @dataclass
 class BeliefNode:
     claim: str
@@ -17,6 +20,10 @@ class BeliefNode:
     def score(self) -> float:
         return self.support - self.conflict
 
+
+# =========================
+# BDH State
+# =========================
 @dataclass
 class BDHState:
     nodes: Dict[str, BeliefNode] = field(default_factory=dict)
@@ -24,7 +31,7 @@ class BDHState:
 
     @property
     def beliefs(self):
-        # Alias for compatibility with UI / reasoner
+        # UI compatibility alias
         return self.nodes
 
     def sparse_update(self, claim: str, signal: float):
@@ -33,12 +40,12 @@ class BDHState:
 
         self.nodes[claim].update(signal)
 
-        # Track updates for plotting in Streamlit
+        # Track belief evolution for visualization
         self.trajectory.append({
             "step": len(self.trajectory) + 1,
             "claim": claim,
             "signal": signal,
-            "current_score": self.nodes[claim].score,  # Match Streamlit app key
+            "current_score": self.nodes[claim].score,
             "global_score": self.global_score()
         })
 
