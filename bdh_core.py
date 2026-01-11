@@ -29,12 +29,13 @@ class BDHState:
 
         self.nodes[claim].update(signal)
 
+        # 🔑 GLOBAL SCORE → visible graph always
         self.trajectory.append({
             "step": len(self.trajectory) + 1,
             "claim": claim,
             "signal": signal,
-            "current_score": self.global_score()  # 🔑 FIX
+            "current_score": self.global_score()
         })
 
     def global_score(self):
-        return sum(n.score for n in self.nodes.values())
+        return sum(node.score for node in self.nodes.values())
