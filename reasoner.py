@@ -2,9 +2,14 @@ import json
 import re
 from bdh_core import BDHState
 
+
+# =========================
+# Chunk Analyzer
+# =========================
 def analyze_chunk(model, narrative_chunk: str, backstory: str):
     """
     Analyze a narrative chunk and return (claim, signal).
+    Robust against malformed LLM output.
     """
 
     prompt = f"""
@@ -26,40 +31,37 @@ Respond ONLY with valid JSON in this exact format:
     try:
         response = model.generate_content(prompt)
 
-        # ---- SAFE RAW TEXT EXTRACTION ----
+        # --- SAFE RAW TEXT EXTRACTION ---
         if hasattr(response, "text") and response.text:
             raw = response.text
         elif hasattr(response, "candidates") and response.candidates:
             raw = response.candidates[0].content.parts[0].text
         else:
-            raise ValueError("Empty Gemini response")
+            raise ValueError("Empty LLM response")
 
-        # ---- DEBUG LOGGING ----
-        # Print raw response for debugging (can be logged to a file if needed)
-        print(f"Raw LLM response:\n{raw}")
+        print("Raw LLM response:\n", raw)
 
-        # ---- EXTRACT JSON BLOCK EVEN WITH EXTRA TEXT ----
-        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        # --- EXTRACT JSON EVEN WITH EXTRA TEXT ---
+        match = re.search(r"\{[\s\S]*?\}", raw)
         if not match:
-            raise ValueError("No JSON found in response")
+            raise ValueError("No JSON block found")
 
-        json_text = match.group(0)
-        data = json.loads(json_text)
+        data = json.loads(match.group())
 
-        score = float(data["score"])
-        claim = str(data["claim"])
+        score = float(data.get("score", 0))
+        claim = str(data.get("claim", "unknown_claim"))
 
         return claim, score
 
     except Exception as e:
-        # Log exception details for debugging
-        print(f"Error parsing LLM response: {e}")
-        print(f"Raw response was: {raw if 'raw' in locals() else 'N/A'}")
-
-        # Use a neutral fallback claim and zero signal to avoid polluting belief nodes negatively
-        return "unparseable_response", 0.0
+        # IMPORTANT: return weak negative signal (not zero)
+        print("Parsing error:", e)
+        return "unparseable_response", -0.1
 
 
+# =========================
+# BDH PIPELINE
+# =========================
 def run_bdh_pipeline(model, narrative: str, backstory: str):
     """
     Full BDH-style continuous reasoning pipeline.
@@ -71,14 +73,18 @@ def run_bdh_pipeline(model, narrative: str, backstory: str):
     chunks = [c.strip() for c in narrative.split("\n\n") if c.strip()]
     chunks = chunks[:8]  # safety cap
 
+    update_count = 0
+
     for chunk in chunks:
         claim, signal = analyze_chunk(model, chunk, backstory)
 
-        # 🔑 SPARSE UPDATE (LOWERED FOR VISIBILITY)
-        if abs(signal) >= 0.3:
+        # 🔑 LOWERED THRESHOLD — CRITICAL FIX
+        if abs(signal) >= 0.1:
             state.sparse_update(claim, signal)
+            update_count += 1
+
+    print("Total belief updates:", update_count)
 
     final_score = state.global_score()
-    prediction = 1 if final_score >= 0 else 0
 
-    return prediction, state
+    # If no updates happened, explicitly mark neutral
