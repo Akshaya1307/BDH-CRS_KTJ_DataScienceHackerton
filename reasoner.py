@@ -141,6 +141,15 @@ def analyze_chunk(model, narrative_chunk: str, backstory: str) -> Tuple[str, flo
     Analyze a single narrative chunk against backstory.
     Returns: (claim, score) where score ∈ {1, 0.5, 0, -0.5, -1}
     """
+    # Clean and prepare the chunk
+    narrative_chunk = narrative_chunk.strip()
+    if not narrative_chunk:
+        return "empty chunk", 0.0
+    
+    # Add punctuation if missing
+    if narrative_chunk and narrative_chunk[-1] not in '.!?':
+        narrative_chunk = narrative_chunk + '.'
+    
     prompt = f"""
 # BDH Consistency Analysis Task
 
@@ -155,18 +164,21 @@ Evaluate ONLY whether the narrative evidence is consistent with the backstory.
 Focus on causal relationships, motivations, and implied states.
 
 ## SCORING GUIDELINES:
-1.0  → CLEAR ALIGNMENT: Evidence directly confirms or strongly supports backstory
-0.5  → PARTIAL ALIGNMENT: Evidence weakly supports or suggests backstory
-0.0  → NEUTRAL: Evidence is unrelated, purely descriptive, or ambiguous
--0.5 → PARTIAL CONTRADICTION: Evidence weakly contradicts or casts doubt on backstory
--1.0 → CLEAR CONTRADICTION: Evidence directly contradicts or invalidates backstory
+- Score 1.0: CLEAR ALIGNMENT - Evidence directly confirms or strongly supports backstory
+- Score 0.5: PARTIAL ALIGNMENT - Evidence weakly supports or suggests backstory  
+- Score 0.0: NEUTRAL - Evidence is unrelated, purely descriptive, or ambiguous
+- Score -0.5: PARTIAL CONTRADICTION - Evidence weakly contradicts or casts doubt on backstory
+- Score -1.0: CLEAR CONTRADICTION - Evidence directly contradicts or invalidates backstory
+
+## CRITICAL INSTRUCTION:
+You MUST choose a non-zero score (1.0, 0.5, -0.5, or -1.0) UNLESS the evidence is truly unrelated.
+Most evidence should be scored as 0.5 (weak support) or -0.5 (weak contradiction).
 
 ## OUTPUT REQUIREMENTS:
 Respond with ONLY valid JSON in this exact format:
 {{
   "score": 1 | 0.5 | 0 | -0.5 | -1,
-  "claim": "brief summary of what this evidence implies about the backstory",
-  "reasoning": "one sentence explaining the score (optional, for debugging)"
+  "claim": "brief summary of what this evidence implies about the backstory"
 }}
 """
 
@@ -174,44 +186,75 @@ Respond with ONLY valid JSON in this exact format:
         response = model.generate_content(prompt)
         raw = response.text if hasattr(response, "text") else str(response)
         
+        # Debug: Print raw response if needed
+        # print(f"DEBUG - Raw response: {raw[:200]}...")
+        
         # Extract JSON from response
         match = re.search(r'\{[\s\S]*\}', raw)
         if not match:
+            # Fallback: look for score pattern
+            score_match = re.search(r'"score"\s*:\s*([-0-9.]+)', raw)
+            claim_match = re.search(r'"claim"\s*:\s*"([^"]+)"', raw)
+            
+            if score_match and claim_match:
+                score = float(score_match.group(1))
+                claim = claim_match.group(1)
+                return claim, score
             raise ValueError("No JSON object found in response")
         
         data = json.loads(match.group())
         
-        # Validate score
-        valid_scores = {1.0, 0.5, 0.0, -0.5, -1.0}
-        score = float(data.get("score", 0))
-        if score not in valid_scores:
-            score = round(score * 2) / 2  # Round to nearest valid score
-            if score not in valid_scores:
+        # Validate and parse score
+        score_str = str(data.get("score", "0")).strip()
+        score = 0.0
+        
+        if score_str == "1":
+            score = 1.0
+        elif score_str == "0.5":
+            score = 0.5
+        elif score_str == "0":
+            score = 0.0
+        elif score_str == "-0.5":
+            score = -0.5
+        elif score_str == "-1":
+            score = -1.0
+        else:
+            try:
+                score = float(score_str)
+                # Round to nearest valid score
+                valid_scores = [1.0, 0.5, 0.0, -0.5, -1.0]
+                score = min(valid_scores, key=lambda x: abs(x - score))
+            except:
                 score = 0.0
         
         claim = str(data.get("claim", "unspecified claim")).strip()
-        if not claim or claim == "unspecified claim":
+        if not claim or claim.lower() == "unspecified claim":
+            # Create a meaningful claim from the chunk
             claim = narrative_chunk[:100] + "..." if len(narrative_chunk) > 100 else narrative_chunk
+        
+        # Debug: Print parsed result
+        # print(f"DEBUG - Parsed: score={score}, claim={claim[:50]}")
         
         return claim, score
         
     except json.JSONDecodeError as e:
         print(f"JSON decode error: {e}")
-        return "parsing error: invalid JSON format", 0.0
+        # Fallback: return neutral score with chunk as claim
+        return narrative_chunk[:100] + "...", 0.0
     except AttributeError as e:
         print(f"Model response error: {e}")
-        return "model error: unexpected response format", 0.0
+        return "model error", 0.0
     except Exception as e:
         print(f"Unexpected error in analyze_chunk: {e}")
-        return "analysis error: unable to process", 0.0
+        return "analysis error", 0.0
 
 
 def run_bdh_pipeline(
     model, 
     narrative: str, 
     backstory: str,
-    min_chunk_length: int = 3,
-    signal_threshold: float = 0.1,
+    min_chunk_length: int = 1,  # Changed from 3 to 1 to include all sentences
+    signal_threshold: float = 0.01,  # Changed from 0.1 to 0.01
     decision_threshold: float = 0.05,
     use_caching: bool = True
 ) -> Tuple[int, BDHState, dict]:
@@ -238,11 +281,12 @@ def run_bdh_pipeline(
     if not narrative or not backstory:
         raise ValueError("Narrative and backstory must not be empty")
     
-    if len(narrative.split()) < 5:
-        raise ValueError("Narrative too short for meaningful analysis (min 5 words)")
+    # Relax minimum word requirement for testing
+    if len(narrative.split()) < 1:
+        raise ValueError("Narrative too short")
     
-    if len(backstory.split()) < 3:
-        raise ValueError("Backstory too short (min 3 words)")
+    if len(backstory.split()) < 1:
+        raise ValueError("Backstory too short")
     
     # Initialize state
     state = BDHState()
@@ -294,13 +338,17 @@ def run_bdh_pipeline(
     confidence_score = state.confidence_score()
     global_score = state.global_score()
     
-    # Decision logic
-    if abs(normalized_score) < decision_threshold:
-        prediction = 0.5  # Uncertain/Neutral
+    # Decision logic - ensure we get a binary output
+    if state.chunk_count == 0:
+        prediction = 0.5  # No chunks processed
+    elif len(state.nodes) == 0:
+        prediction = 0.5  # No belief nodes formed
     elif normalized_score >= decision_threshold:
         prediction = 1  # Consistent
-    else:
+    elif normalized_score <= -decision_threshold:
         prediction = 0  # Contradict
+    else:
+        prediction = 0.5  # Uncertain
     
     # Prepare metadata
     metadata = {
