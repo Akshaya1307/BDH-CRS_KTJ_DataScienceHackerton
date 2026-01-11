@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Dict, List
 
-
 @dataclass
 class BeliefNode:
     claim: str
@@ -15,7 +14,7 @@ class BeliefNode:
             self.conflict += abs(signal)
 
     @property
-    def score(self) -> float:
+    def score(self):
         return self.support - self.conflict
 
 
@@ -24,13 +23,9 @@ class BDHState:
     nodes: Dict[str, BeliefNode] = field(default_factory=dict)
     trajectory: List[dict] = field(default_factory=list)
 
-    @property
-    def beliefs(self):
-        return self.nodes
-
     def sparse_update(self, claim: str, signal: float):
         if claim not in self.nodes:
-            self.nodes[claim] = BeliefNode(claim=claim)
+            self.nodes[claim] = BeliefNode(claim)
 
         self.nodes[claim].update(signal)
 
@@ -38,9 +33,8 @@ class BDHState:
             "step": len(self.trajectory) + 1,
             "claim": claim,
             "signal": signal,
-            "current_score": self.nodes[claim].score,
-            "global_score": self.global_score()
+            "current_score": self.global_score()  # 🔑 FIX
         })
 
-    def global_score(self) -> float:
-        return sum(node.score for node in self.nodes.values())
+    def global_score(self):
+        return sum(n.score for n in self.nodes.values())
