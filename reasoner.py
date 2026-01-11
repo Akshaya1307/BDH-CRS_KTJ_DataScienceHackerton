@@ -4,6 +4,12 @@ from bdh_core import BDHState
 
 
 def analyze_chunk(model, narrative_chunk: str, backstory: str):
+    """
+    Gemini-based causal scoring.
+    NEVER returns None.
+    NEVER returns untracked signals.
+    """
+
     prompt = f"""
 You are evaluating whether the narrative evidence is CONSISTENT or CONTRADICTORY
 with the given backstory.
@@ -14,14 +20,14 @@ Backstory:
 Narrative evidence:
 {narrative_chunk}
 
-Rules:
-- Clear alignment → score = 1
-- Partial alignment → score = 0.5
+Scoring rules:
+- Strong alignment → score = 1
+- Mild alignment → score = 0.5
 - Neutral / descriptive → score = 0
-- Partial contradiction → score = -0.5
-- Clear contradiction → score = -1
+- Mild contradiction → score = -0.5
+- Strong contradiction → score = -1
 
-Respond ONLY with JSON:
+Respond ONLY with valid JSON:
 {{
   "score": 1 | 0.5 | 0 | -0.5 | -1,
   "claim": "short causal claim"
@@ -43,26 +49,33 @@ Respond ONLY with JSON:
         return claim, score
 
     except Exception as e:
-        # ✅ Neutral fallback (NOT negative)
-        print("Parse error:", e)
+        # 🔒 SAFE fallback: neutral evidence (still updates!)
+        print("Gemini parse error:", e)
         return "uncertain evidence", 0.0
 
 
 def run_bdh_pipeline(model, narrative: str, backstory: str):
+    """
+    FINAL BDH PIPELINE
+    - Sentence-level updates
+    - No filtering of updates
+    - Always returns (prediction, state)
+    """
+
     state = BDHState()
 
-    # ✅ Sentence-level chunking → visible trajectory
+    # 🔑 Sentence-wise chunking = visible graph
     chunks = [c.strip() for c in narrative.split(".") if c.strip()]
 
     for chunk in chunks:
         claim, signal = analyze_chunk(model, chunk, backstory)
 
-        if abs(signal) >= 0.1:
-            state.sparse_update(claim, signal)
+        # 🔥 ALWAYS update state (even for 0)
+        state.sparse_update(claim, signal)
 
     final_score = state.global_score()
 
-    # 🔥 FINAL FIX: neutral is NOT contradiction
+    # 🔑 Correct decision logic
     prediction = 1 if final_score >= 0 else 0
 
     return prediction, state
