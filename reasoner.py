@@ -5,11 +5,11 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Tuple, Optional
 from functools import lru_cache
 
-# Download nltk data if needed (uncomment on first run)
-# try:
-#     nltk.data.find('tokenizers/punkt')
-# except LookupError:
-#     nltk.download('punkt')
+# Download nltk data if needed
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt', quiet=True)
 
 @dataclass
 class BeliefNode:
@@ -311,6 +311,7 @@ def run_bdh_pipeline(
         "total_chunks": state.chunk_count,
         "processed_chunks": state.processed_count,
         "belief_nodes": len(state.nodes),
+        "belief_density": len(state.nodes) / max(state.chunk_count, 1),
         "decision_threshold": decision_threshold,
         "decision_reason": f"normalized_score={normalized_score:.3f} vs threshold={decision_threshold}"
     }
